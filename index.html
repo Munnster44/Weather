@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Great Lakes Weather (PWA)</title>
+<meta name="theme-color" content="#2f80ed">
+
+<style>
+body{font-family:Arial,sans-serif;margin:20px;}
+label,select,button{font-size:1.05rem;margin:6px;}
+#tip{font-size:0.9rem;color:#444;margin-top:4px;margin-bottom:14px;}
+#weather{margin-top:20px;border-top:1px solid #ccc;padding-top:10px;}
+.wind-row{display:flex;flex-wrap:wrap;gap:10px;}
+.wind-item{background:#f6f6f6;padding:6px 10px;border-radius:6px;}
+.error{color:#a00;}
+footer{margin-top:24px;font-size:0.9rem;color:#555;border-top:1px solid #ddd;padding-top:12px;}
+#version{font-size:0.85rem;color:#777;margin-top:8px;}
+.modal{display:none;position:fixed;z-index:10;left:0;top:0;width:100%;height:100%;background:rgba(0,0,0,0.4);}
+.modal-content{background:#fff;margin:10% auto;padding:20px;border-radius:10px;width:90%;max-width:500px;text-align:center;}
+.close{float:right;font-size:1.4rem;cursor:pointer;}
+code{background:#f4f4f4;padding:2px 6px;border-radius:4px;}
+#installToast{position:fixed;left:50%;transform:translateX(-50%);bottom:18px;z-index:9999;background:#2f80ed;color:#fff;
+padding:10px 14px;border-radius:999px;font-size:0.95rem;box-shadow:0 6px 18px rgba(0,0,0,.2);display:none;}
+</style>
+</head>
+<body>
+<h1>Great Lakes Boating Weather Tool</h1>
+
+<label for="lake">Choose a location:</label>
+<select id="lake">
+  <option value="43.9,-77.7">Lake Ontario near Presqu'ile Point</option>
+  <option value="44.1,-76.6">Lake Ontario near Wolfe Island</option>
+  <option value="44.94,-78.17">Lake Ontario near Cobourg</option>
+  <option value="43.58,-79.36">Lake Ontario near Toronto</option>
+  <option value="43.29,-79.75">Lake Ontario near Hamilton</option>
+  <option value="43.25,-79.21">Lake Ontario near Welland Canal Entrance</option>
+  <option value="43.29,-79.08">Lake Ontario near Niagara-on-the-Lake</option>
+  <option value="42.78,-80.2">Lake Erie near Port Dover</option>
+  <option value="42.86,-79.25">Lake Erie near Port Colborne</option>
+  <option value="42.55,-80.39">Lake Erie near Long Point</option>
+  <option value="43.75,-81.7">Lake Huron near Goderich</option>
+  <option value="45.27,-81.67">Lake Huron near Tobermory</option>
+  <option value="44.63,-81.39">Lake Huron near Sauble Beach</option>
+  <option value="45.5,-80.7">Georgian Bay near Pointe au Baril</option>
+  <option value="44.54,-80.05">Georgian Bay near Wasaga Beach</option>
+  <option value="46.5,-84.3">Lake Superior near Sault Ste. Marie</option>
+  <option value="48.1,-88.9">Lake Superior near Thunder Bay</option>
+</select>
+<p id="tip">💡 Tip: You can add your own locations using decimal GPS coordinates (latitude, longitude) — e.g. <code>43.25,-79.87</code></p>
+
+<button id="btnGet">Refresh Weather</button>
+<button id="btnReadMe">ReadMe / Enter Key</button>
+<button id="btnNewLoc">New Location</button>
+
+<div id="weather"></div>
+
+<footer>
+  © 2025 <strong>Boater-Aid / Glen Carruthers</strong> — All rights reserved.<br>
+  <div id="version">Version: v5.5-PWA — Built: November 2025</div>
+  <a href="#" id="aboutLink">About / Legal</a>
+</footer>
+
+<div id="aboutModal" class="modal">
+  <div class="modal-content">
+    <span class="close" id="closeModal">&times;</span>
+    <p><strong>Boater-Aid Great Lakes Weather Tool</strong></p>
+    <p>© 2025 Glen Carruthers / Boater-Aid.<br>Protected by Canadian and international copyright law.</p>
+  </div>
+</div>
+
+<div id="installToast">✅ App installed and ready for offline use</div>
+
+<script>
+/* ===== PWA MANIFEST + ICON + SERVICE WORKER ===== */
+function generateGLWIcon(size){
+  const c=document.createElement('canvas');c.width=c.height=size;const ctx=c.getContext('2d');
+  ctx.fillStyle='#cccccc';ctx.fillRect(0,0,size,size);
+  ctx.fillStyle='#ffffff';const cx=size*0.5,cy=size*0.6,r=size*0.18;
+  ctx.beginPath();ctx.arc(cx-r*1.1,cy,r*0.9,0,Math.PI*2);
+  ctx.arc(cx,cy-r*0.45,r*1.1,0,Math.PI*2);
+  ctx.arc(cx+r*1.1,cy,r,0,Math.PI*2);ctx.closePath();ctx.fill();ctx.fillRect(cx-r*2,cy,r*4,r*0.9);
+  ctx.fillStyle='#2f80ed';ctx.font=`${Math.round(size*0.28)}px Arial Black,Arial,sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillText('GLW',size/2,size*0.28);
+  return c.toDataURL('image/png');
+}
+const icon192=generateGLWIcon(192),icon512=generateGLWIcon(512);
+const manifest={name:"Great Lakes Weather (PWA)",short_name:"GLW",start_url:"./",scope:"./",display:"standalone",
+theme_color:"#2f80ed",background_color:"#cccccc",icons:[{src:icon192,sizes:"192x192",type:"image/png"},{src:icon512,sizes:"512x512",type:"image/png"}]};
+const mBlob=new Blob([JSON.stringify(manifest)],{type:"application/manifest+json"});
+const mURL=URL.createObjectURL(mBlob);const link=document.createElement('link');link.rel='manifest';link.href=mURL;document.head.appendChild(link);
+
+const swCode=`
+ const CACHE_NAME='glw-v5-5';self.addEventListener('install',e=>self.skipWaiting());
+ self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(k=>Promise.all(k.map(n=>n!==CACHE_NAME?caches.delete(n):null))));self.clients.claim();});
+ self.addEventListener('fetch',e=>{const r=e.request;if(r.method!=='GET')return;const same=new URL(r.url).origin===location.origin;
+  if(same){e.respondWith(caches.open(CACHE_NAME).then(c=>c.match(r).then(h=>h||fetch(r).then(resp=>{c.put(r,resp.clone());return resp;}))));}
+  else{e.respondWith(fetch(r).catch(()=>caches.match(r)));}});
+`;
+const swURL=URL.createObjectURL(new Blob([swCode],{type:'text/javascript'}));
+if('serviceWorker'in navigator){
+  navigator.serviceWorker.register(swURL).then(()=>{
+    if(!navigator.serviceWorker.controller){
+      navigator.serviceWorker.addEventListener('controllerchange',()=>{
+        const t=document.getElementById('installToast');
+        if(t){t.style.display='block';setTimeout(()=>t.style.display='none',3500);}
+      });
+    }
+  }).catch(e=>console.warn('SW fail',e));
+}
+
+/* ===== MAIN APP LOGIC ===== */
+window.addEventListener("DOMContentLoaded",()=>{
+  const lake=document.getElementById("lake"),weather=document.getElementById("weather"),
+  btnGet=document.getElementById("btnGet"),btnReadMe=document.getElementById("btnReadMe"),
+  btnNewLoc=document.getElementById("btnNewLoc"),aboutLink=document.getElementById("aboutLink"),
+  aboutModal=document.getElementById("aboutModal"),closeModal=document.getElementById("closeModal");
+  let OPENWEATHER_API_KEY="Enter_key_here";
+
+  function ms_to_mph(ms){return ms*2.2369363;}
+  function ms_to_knots(ms){return ms*1.9438445;}
+
+  async function getWeather(){
+    if(OPENWEATHER_API_KEY==="Enter_key_here"){alert("Please enter your OpenWeather API key first using the ReadMe button.");return;}
+    const[lat,lon]=lake.value.split(',');weather.innerHTML="Loading...";
+    try{const r=await fetch(`https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&units=metric&appid=${OPENWEATHER_API_KEY}`);
+      if(!r.ok)throw new Error(await r.text());const d=await r.json(),w=d.wind||{};
+      const ws=w.speed||0,wd=w.deg??"n/a",gust=w.gust??null,t=d.main?.temp??"n/a",desc=d.weather?.[0]?.description??"n/a";
+      const now=new Date().toLocaleString();
+      weather.innerHTML=`<h3>${desc}, ${t}°C</h3><div class="wind-row">
+      <div class="wind-item"><b>Wind:</b> ${ws.toFixed(1)} m/s (${ms_to_mph(ws).toFixed(1)} mph, ${ms_to_knots(ws).toFixed(1)} kt)</div>
+      ${gust?`<div class="wind-item"><b>Gust:</b> ${gust.toFixed(1)} m/s (${ms_to_mph(gust).toFixed(1)} mph)</div>`:"<div class='wind-item'><i>No gust data</i></div>"}
+      <div class="wind-item"><b>Dir:</b> ${wd}°</div></div>
+      <p style='margin-top:8px;color:#555;font-size:0.9rem;'>Updated: ${now}</p>`;
+    }catch(e){weather.innerHTML=`<p class='error'>Error: ${e.message}</p>`;}
+  }
+
+  async function saveHTMLWithPrompt(name,html){
+    try{if(window.showSaveFilePicker){
+      const f=await window.showSaveFilePicker({suggestedName:name,types:[{description:"HTML",accept:{"text/html":[".html"]}}]});
+      const w=await f.createWritable();await w.write(html);await w.close();alert("✅ File saved successfully!");return;}
+    }catch(e){}
+    const fn=prompt("Enter filename:",name)||name;const blob=new Blob([html],{type:"text/html"});
+    const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=fn;a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href),1e3);alert("✅ File saved successfully!");
+  }
+
+  async function readmeHandler(){
+    alert("A free API key from OpenWeather is required for this program to function.\n\n1️⃣ Visit: https://home.openweathermap.org/users/sign_up\n2️⃣ Sign up (free) and get your key under “My API keys”.\n3️⃣ Paste your key below to permanently activate this app.");
+    const k=prompt("Enter your OpenWeather API key:");if(!k)return;
+    const html=document.documentElement.outerHTML.replace('let OPENWEATHER_API_KEY="Enter_key_here";',`let OPENWEATHER_API_KEY="${k.trim()}";`)
+      .replace(/<button[^>]*id=["']btnReadMe["'][^>]*>[\s\S]*?<\/button>/i,'<button id="btnReadMe" disabled>Key entered</button>');
+    await saveHTMLWithPrompt("weather-mph-gust-v5-5-pwa-with-key.html",html);
+  }
+
+  async function newLocation(){
+    const name=prompt("Enter a name for the new location:");if(!name)return;
+    const coords=prompt("Enter coordinates lat,lon:");if(!coords)return;
+    const[la,lo]=coords.split(',').map(s=>s.trim()),lat=parseFloat(la),lon=parseFloat(lo);
+    if(isNaN(lat)||isNaN(lon)||lat<-90||lat>90||lon<-180||lon>180){alert("Invalid coordinates");return;}
+    const o=document.createElement('option');o.value=`${lat},${lon}`;o.textContent=`${name} (${lat.toFixed(2)}, ${lon.toFixed(2)})`;
+    lake.insertBefore(o,lake.firstChild);lake.value=o.value;alert(`Added ${name} at [${lat.toFixed(4)}, ${lon.toFixed(4)}]`);
+    if(confirm("Save updated version?")){const html=document.documentElement.outerHTML;await saveHTMLWithPrompt("weather-mph-gust-v5-5-pwa-with-locations.html",html);}
+  }
+
+  btnGet.addEventListener("click",getWeather);
+  btnReadMe.addEventListener("click",readmeHandler);
+  btnNewLoc.addEventListener("click",newLocation);
+  aboutLink.addEventListener("click",e=>{e.preventDefault();aboutModal.style.display="block";});
+  closeModal.addEventListener("click",()=>aboutModal.style.display="none");
+  window.addEventListener("click",e=>{if(e.target===aboutModal)aboutModal.style.display="none";});
+});
+</script>
+</body>
+</html>
